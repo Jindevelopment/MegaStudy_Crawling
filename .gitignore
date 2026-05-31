@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Output / generated files
+output/
+flask_out.txt
+flask_err.txt
+
+# OS / editor
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# Local images / temp
+*.png
+*.jpg
+*.jpeg
+
+# Claude internal
+.claude/

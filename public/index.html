@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>미맥스터디 Q&A 크롤러</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* 전체 레이아웃 */
+    html, body { height: 100%; margin: 0; }
+    #layout { display: flex; height: 100vh; overflow: hidden; background: #f4f6f9; }
+
+    /* 사이드바 */
+    #sidebar {
+      width: 240px; min-width: 240px; background: #fff;
+      border-right: 1px solid #e8ecf0;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    #sidebar-scroll { flex: 1; overflow-y: auto; padding: 16px; }
+
+    /* 메인 */
+    #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    #main-scroll { flex: 1; overflow-y: auto; padding: 24px; }
+
+    /* 선생님 목록 */
+    .teacher-item { display:flex; align-items:center; gap:10px; padding:8px 10px;
+      border-radius:8px; cursor:pointer; transition:background .15s; }
+    .teacher-item:hover { background:#fff4ed; }
+    .teacher-item.selected { background:#fff0e6; }
+    .teacher-item input[type=checkbox] { accent-color:#f97316; width:15px; height:15px; }
+
+    /* QNA 테이블 */
+    .qtbl { width:100%; border-collapse:collapse; font-size:.82rem; }
+    .qtbl th {
+      background:#f8f9fb; font-weight:600; padding:10px 16px;
+      border-bottom:2px solid #e8ecf0; white-space:nowrap;
+      position:sticky; top:0; z-index:1; text-align:left;
+    }
+    .qtbl td { padding:9px 16px; border-bottom:1px solid #f4f6f9; vertical-align:middle; }
+    .qtbl tbody tr:hover td { background:#fffbf7; }
+
+    /* 분석 테이블 */
+    .atbl { width:100%; border-collapse:collapse; font-size:.76rem; text-align:center; }
+    .atbl th {
+      background:#f8f9fb; font-weight:600; padding:9px 12px;
+      border-bottom:2px solid #e8ecf0; white-space:nowrap;
+      position:sticky; top:0; z-index:1;
+    }
+    .atbl td { padding:7px 12px; border-bottom:1px solid #f4f6f9; white-space:nowrap; }
+    .atbl tbody tr:last-child td { font-weight:700; background:#fff4ed; color:#c2410c; }
+    .atbl tbody tr:not(:last-child):hover td { background:#fafafa; }
+    .atbl td.zero { color:#d1d5db; }
+    .atbl td:first-child, .atbl th:first-child { text-align:left; }
+
+    /* 스피너 */
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .spin { animation:spin .7s linear infinite; }
+
+    /* 로딩 바 */
+    @keyframes bar { 0%{left:-40%;width:40%} 60%{left:40%;width:60%} 100%{left:110%;width:40%} }
+    .loading-track { position:relative; height:3px; background:#ffe4cc; border-radius:99px; overflow:hidden; }
+    .loading-track::after {
+      content:''; position:absolute; top:0; height:100%;
+      background:#f97316; border-radius:99px;
+      animation:bar 1.4s ease infinite;
+    }
+
+    /* 탭 */
+    .tab-on  { color:#f97316; border-bottom:2px solid #f97316; font-weight:600; }
+    .tab-off { color:#94a3b8; border-bottom:2px solid transparent; }
+    .tab-off:hover { color:#64748b; }
+
+    /* 스크롤바 */
+    ::-webkit-scrollbar { width:5px; height:5px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:#ddd; border-radius:99px; }
+
+    /* 페이드인 */
+    @keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+    .fade-up { animation:fadeUp .3s ease; }
+  </style>
+</head>
+<body>
+<div id="layout">
+
+  <!-- ───────── 사이드바 ───────── -->
+  <aside id="sidebar">
+    <!-- 로고 -->
+    <div class="flex items-center gap-2.5 px-5 py-4 border-b border-gray-100">
+      <div class="w-7 h-7 bg-orange-500 rounded-lg flex items-center justify-center text-white font-black text-sm">Q</div>
+      <div>
+        <div class="text-sm font-bold text-gray-800 leading-tight">미맥 Q&A 크롤러</div>
+        <div class="text-[10px] text-gray-400">mimacstudy analyzer</div>
+      </div>
+    </div>
+
+    <div id="sidebar-scroll" class="space-y-5">
+
+      <!-- 날짜 범위 -->
+      <div>
+        <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">날짜 범위</p>
+        <div class="space-y-1.5">
+          <input type="date" id="startDate"
+                 class="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs
+                        focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent" />
+          <input type="date" id="endDate"
+                 class="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs
+                        focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent" />
+        </div>
+        <div class="grid grid-cols-3 gap-1 mt-2">
+          <button onclick="setDateRange('this-month')"
+                  class="py-1 text-[11px] border border-gray-200 rounded-md text-gray-500
+                         hover:bg-orange-50 hover:text-orange-600 hover:border-orange-200 transition">
+            이번 달
+          </button>
+          <button onclick="setDateRange('last-month')"
+                  class="py-1 text-[11px] border border-gray-200 rounded-md text-gray-500
+                         hover:bg-orange-50 hover:text-orange-600 hover:border-orange-200 transition">
+            지난 달
+          </button>
+          <button onclick="setDateRange('last-7')"
+                  class="py-1 text-[11px] border border-gray-200 rounded-md text-gray-500
+                         hover:bg-orange-50 hover:text-orange-600 hover:border-orange-200 transition">
+            최근 7일
+          </button>
+        </div>
+      </div>
+
+      <!-- 선생님 선택 -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wider">선생님 선택</p>
+          <span id="selectedBadge"
+                class="text-[10px] bg-orange-100 text-orange-600 font-bold px-1.5 py-0.5 rounded-full hidden">
+            0명
+          </span>
+        </div>
+
+        <!-- 검색 -->
+        <div class="relative mb-2">
+          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400"
+               fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z"/>
+          </svg>
+          <input id="teacherSearch" type="text" placeholder="검색..."
+                 class="w-full pl-7 pr-2.5 py-1.5 text-xs border border-gray-200 rounded-lg
+                        focus:outline-none focus:ring-2 focus:ring-orange-400" />
+        </div>
+
+        <!-- 목록 -->
+        <div id="teacherList" class="space-y-0.5 max-h-56 overflow-y-auto">
+          <div class="flex flex-col items-center justify-center py-6 gap-2">
+            <svg class="w-4 h-4 text-gray-300 spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            <span class="text-xs text-gray-400">불러오는 중...</span>
+          </div>
+        </div>
+        <p id="teacherError" class="mt-1 text-[11px] text-red-400 hidden"></p>
+
+        <!-- 전체/해제 -->
+        <div class="flex gap-1.5 mt-2">
+          <button id="selectAll"
+                  class="flex-1 py-1 text-[11px] border border-gray-200 rounded-md text-gray-500
+                         hover:bg-orange-50 hover:text-orange-600 hover:border-orange-200 transition">
+            전체 선택
+          </button>
+          <button id="clearAll"
+                  class="flex-1 py-1 text-[11px] border border-gray-200 rounded-md text-gray-400
+                         hover:bg-gray-50 transition">
+            전체 해제
+          </button>
+        </div>
+      </div>
+
+      <!-- 크롤링 버튼 -->
+      <div class="space-y-2">
+        <button id="crawlBtn"
+                class="w-full bg-orange-500 text-white rounded-xl py-2.5 text-sm font-bold
+                       hover:bg-orange-600 active:scale-[.98] transition
+                       disabled:opacity-40 disabled:cursor-not-allowed disabled:scale-100"
+                disabled>
+          <span id="crawlBtnText">크롤링 시작</span>
+        </button>
+        <div id="loadingTrack" class="loading-track hidden"></div>
+        <p id="statusMsg" class="text-[11px] text-center text-gray-400 hidden"></p>
+      </div>
+
+      <!-- 결과 미니 통계 -->
+      <div id="miniStats" class="hidden bg-orange-50 rounded-xl p-3 space-y-2">
+        <p class="text-[11px] font-bold text-orange-600 uppercase tracking-wider">수집 결과</p>
+        <div id="miniStatContent" class="space-y-1.5"></div>
+      </div>
+
+    </div><!-- /sidebar-scroll -->
+  </aside>
+
+  <!-- ───────── 메인 ───────── -->
+  <main id="main">
+
+    <!-- 메인 상단 헤더 -->
+    <div class="bg-white border-b border-gray-100 px-6 py-3 flex items-center justify-between shrink-0">
+      <div id="mainHeader">
+        <p class="text-sm font-bold text-gray-700">Q&A 분석 대시보드</p>
+        <p class="text-xs text-gray-400">선생님과 날짜 범위를 선택하고 크롤링을 시작하세요</p>
+      </div>
+      <button id="downloadBtn"
+              class="hidden items-center gap-1.5 bg-orange-500 text-white px-4 py-2 rounded-lg
+                     text-xs font-bold hover:bg-orange-600 active:scale-[.98] transition">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"/>
+        </svg>
+        Excel 다운로드
+      </button>
+    </div>
+
+    <div id="main-scroll">
+
+      <!-- ── 빈 상태 ── -->
+      <div id="emptyState" class="flex flex-col items-center justify-center h-full min-h-[60vh] gap-4">
+        <div class="w-16 h-16 bg-orange-50 rounded-2xl flex items-center justify-center">
+          <svg class="w-8 h-8 text-orange-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+        </div>
+        <div class="text-center">
+          <p class="text-base font-bold text-gray-500">아직 수집된 데이터가 없어요</p>
+          <p class="text-sm text-gray-400 mt-1">왼쪽에서 선생님과 날짜를 선택한 뒤<br>크롤링을 시작하세요</p>
+        </div>
+      </div>
+
+      <!-- ── 결과 영역 ── -->
+      <div id="resultSection" class="hidden fade-up space-y-4">
+
+        <!-- 통계 카드 행 -->
+        <div id="statCards" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+
+        <!-- 탭 + 컨텐츠 -->
+        <div class="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+          <div class="flex border-b border-gray-100">
+            <button onclick="switchTab(0)" id="tab0Btn"
+                    class="flex-1 py-3 text-sm transition tab-on">
+              QNA 데이터 <span id="tab0Count" class="text-xs font-normal opacity-60 ml-1"></span>
+            </button>
+            <button onclick="switchTab(1)" id="tab1Btn"
+                    class="flex-1 py-3 text-sm transition tab-off">
+              분석1 — 날짜별 과목
+            </button>
+            <button onclick="switchTab(2)" id="tab2Btn"
+                    class="flex-1 py-3 text-sm transition tab-off">
+              분석2 — 강좌별 구분
+            </button>
+          </div>
+
+          <!-- QNA 테이블 패널 -->
+          <div id="panel0">
+            <div class="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
+              <div class="relative flex-1 max-w-xs">
+                <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400"
+                     fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z"/>
+                </svg>
+                <input id="qnaSearch" type="text" placeholder="강좌명, 선생님 검색..."
+                       class="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg
+                              focus:outline-none focus:ring-2 focus:ring-orange-400" />
+              </div>
+              <span id="qnaDisplayCount" class="text-xs text-gray-400 whitespace-nowrap shrink-0"></span>
+            </div>
+            <div class="overflow-x-auto max-h-[560px] overflow-y-auto">
+              <table class="qtbl">
+                <thead>
+                  <tr>
+                    <th class="w-28">날짜</th>
+                    <th class="w-28">선생님</th>
+                    <th class="w-24">구분</th>
+                    <th>강좌명</th>
+                  </tr>
+                </thead>
+                <tbody id="qnaBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 분석1 -->
+          <div id="panel1" class="overflow-x-auto max-h-[560px] overflow-y-auto hidden">
+            <table id="table1" class="atbl"></table>
+          </div>
+
+          <!-- 분석2 -->
+          <div id="panel2" class="overflow-x-auto max-h-[560px] overflow-y-auto hidden">
+            <table id="table2" class="atbl"></table>
+          </div>
+        </div>
+
+      </div><!-- /resultSection -->
+    </div><!-- /main-scroll -->
+  </main>
+
+</div><!-- /layout -->
+
+<script>
+  /* ── DOM refs ── */
+  const startDateEl     = document.getElementById('startDate');
+  const endDateEl       = document.getElementById('endDate');
+  const teacherListEl   = document.getElementById('teacherList');
+  const teacherErrorEl  = document.getElementById('teacherError');
+  const teacherSearch   = document.getElementById('teacherSearch');
+  const selectedBadge   = document.getElementById('selectedBadge');
+  const crawlBtn        = document.getElementById('crawlBtn');
+  const crawlBtnText    = document.getElementById('crawlBtnText');
+  const loadingTrack    = document.getElementById('loadingTrack');
+  const statusMsg       = document.getElementById('statusMsg');
+  const miniStats       = document.getElementById('miniStats');
+  const miniStatContent = document.getElementById('miniStatContent');
+  const mainHeader      = document.getElementById('mainHeader');
+  const downloadBtn     = document.getElementById('downloadBtn');
+  const emptyState      = document.getElementById('emptyState');
+  const resultSection   = document.getElementById('resultSection');
+  const statCards       = document.getElementById('statCards');
+  const qnaBody         = document.getElementById('qnaBody');
+  const qnaSearch       = document.getElementById('qnaSearch');
+  const qnaDisplayCount = document.getElementById('qnaDisplayCount');
+  const tab0Count       = document.getElementById('tab0Count');
+
+  /* ── 상태 ── */
+  let teachers       = [];
+  let allItems       = [];
+  let currentExcelB64 = null;
+  let currentFilename = null;
+
+  /* ── 기본 날짜 ── */
+  const today    = new Date();
+  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+  endDateEl.value   = today.toISOString().slice(0, 10);
+  startDateEl.value = firstDay.toISOString().slice(0, 10);
+
+  /* ── 날짜 빠른 선택 ── */
+  function setDateRange(type) {
+    const t = new Date();
+    let s, e;
+    if      (type === 'this-month')  { s = new Date(t.getFullYear(), t.getMonth(), 1); e = t; }
+    else if (type === 'last-month')  { s = new Date(t.getFullYear(), t.getMonth()-1, 1); e = new Date(t.getFullYear(), t.getMonth(), 0); }
+    else                             { s = new Date(t.getTime() - 6*86400000); e = t; }
+    startDateEl.value = s.toISOString().slice(0,10);
+    endDateEl.value   = e.toISOString().slice(0,10);
+    updateCrawlBtn();
+  }
+
+  function toApiDate(s) { return s.replace(/-/g, '/'); }
+
+  /* ── 크롤링 버튼 활성화 ── */
+  function updateCrawlBtn() {
+    crawlBtn.disabled = !teachers.some(t => t.checked) || !startDateEl.value || !endDateEl.value;
+  }
+
+  /* ── 선택 뱃지 ── */
+  function updateBadge() {
+    const n = teachers.filter(t => t.checked).length;
+    selectedBadge.textContent = `${n}명`;
+    selectedBadge.classList.toggle('hidden', n === 0);
+  }
+
+  /* ── 탭 전환 ── */
+  function switchTab(n) {
+    [0,1,2].forEach(i => {
+      document.getElementById(`panel${i}`).classList.toggle('hidden', i !== n);
+      document.getElementById(`tab${i}Btn`).className =
+        `flex-1 py-3 text-sm transition ${i === n ? 'tab-on' : 'tab-off'}`;
+    });
+  }
+
+  /* ── 구분 색상 ── */
+  const CAT = {
+    '[강좌]' : { bg:'#eff6ff', text:'#1d4ed8', border:'#bfdbfe' },
+    '[교재]' : { bg:'#f0fdf4', text:'#15803d', border:'#bbf7d0' },
+    '[학습법]': { bg:'#faf5ff', text:'#7c3aed', border:'#e9d5ff' },
+    '[기타]' : { bg:'#f8fafc', text:'#64748b', border:'#e2e8f0' },
+  };
+
+  /* ── QNA 테이블 렌더링 ── */
+  function renderCards(items) {
+    allItems = items.length !== undefined ? items : allItems;
+    flushQna(items);
+  }
+
+  function flushQna(rows) {
+    if (!rows.length) {
+      qnaBody.innerHTML =
+        `<tr><td colspan="4" class="py-12 text-center text-gray-400 text-sm">
+           ${allItems.length ? '검색 결과가 없습니다.' : '수집된 데이터가 없습니다.'}
+         </td></tr>`;
+      qnaDisplayCount.textContent = allItems.length ? `0 / ${allItems.length.toLocaleString()}건` : '';
+      return;
+    }
+    qnaBody.innerHTML = rows.map(it => {
+      const c = CAT[it['구분']] || CAT['[기타]'];
+      return `<tr>
+        <td class="text-xs font-mono text-gray-400 whitespace-nowrap">${it['날짜']}</td>
+        <td class="text-xs text-gray-600 whitespace-nowrap">${it['선생님']}</td>
+        <td class="whitespace-nowrap">
+          <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold"
+                style="background:${c.bg};color:${c.text};border:1px solid ${c.border}">
+            ${it['구분']}
+          </span>
+        </td>
+        <td class="text-sm text-gray-800">${it['강좌명']}</td>
+      </tr>`;
+    }).join('');
+    qnaDisplayCount.textContent =
+      rows.length === allItems.length
+        ? `${rows.length.toLocaleString()}건`
+        : `${rows.length.toLocaleString()} / ${allItems.length.toLocaleString()}건`;
+  }
+
+  /* ── QNA 검색 ── */
+  qnaSearch.addEventListener('input', () => {
+    const q = qnaSearch.value.trim().toLowerCase();
+    flushQna(!q ? allItems : allItems.filter(it =>
+      it['강좌명'].toLowerCase().includes(q) || it['선생님'].toLowerCase().includes(q) || it['날짜'].includes(q)
+    ));
+  });
+
+  /* ── 분석 테이블 ── */
+  function renderAnalysis(el, rows) {
+    if (!rows || !rows.length) {
+      el.innerHTML = '<tr><td class="py-10 text-center text-gray-400">데이터가 없습니다.</td></tr>';
+      return;
+    }
+    const headers = Object.keys(rows[0]);
+    el.innerHTML =
+      '<thead><tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr></thead>' +
+      '<tbody>' + rows.map(row =>
+        '<tr>' + headers.map(h => {
+          const v = row[h]; const z = typeof v === 'number' && v === 0;
+          return `<td class="${z?'zero':''}">${z?'—':v}</td>`;
+        }).join('') + '</tr>'
+      ).join('') + '</tbody>';
+  }
+
+  /* ── 선생님 렌더링 ── */
+  function renderTeachers(filter = '') {
+    const f = filter.toLowerCase();
+    const visible = teachers.filter(t => !f || t.name.toLowerCase().includes(f) || t.code.includes(f));
+
+    if (!teachers.length) {
+      teacherListEl.innerHTML =
+        '<p class="text-xs text-center text-gray-400 py-4">선생님이 없습니다</p>'; return;
+    }
+    if (!visible.length) {
+      teacherListEl.innerHTML =
+        '<p class="text-xs text-center text-gray-400 py-4">검색 결과 없음</p>'; return;
+    }
+
+    teacherListEl.innerHTML = '';
+    visible.forEach(t => {
+      const div = document.createElement('label');
+      div.className = `teacher-item${t.checked ? ' selected' : ''}`;
+      div.innerHTML =
+        `<input type="checkbox" class="teacher-cb" data-code="${t.code}" ${t.checked?'checked':''} />` +
+        `<span class="flex-1 text-xs text-gray-700 font-medium">${t.name}</span>` +
+        `<span class="text-[10px] text-gray-400 tabular-nums">${t.code}</span>`;
+      teacherListEl.appendChild(div);
+    });
+
+    teacherListEl.querySelectorAll('.teacher-cb').forEach(cb => {
+      cb.addEventListener('change', e => {
+        const t = teachers.find(t => t.code === e.target.dataset.code);
+        if (t) { t.checked = e.target.checked; }
+        renderTeachers(teacherSearch.value);
+        updateBadge(); updateCrawlBtn();
+      });
+    });
+  }
+
+  teacherSearch.addEventListener('input', () => renderTeachers(teacherSearch.value));
+  document.getElementById('selectAll').addEventListener('click', () => {
+    teachers.forEach(t => t.checked = true);
+    renderTeachers(teacherSearch.value); updateBadge(); updateCrawlBtn();
+  });
+  document.getElementById('clearAll').addEventListener('click', () => {
+    teachers.forEach(t => t.checked = false);
+    renderTeachers(teacherSearch.value); updateBadge(); updateCrawlBtn();
+  });
+  startDateEl.addEventListener('change', updateCrawlBtn);
+  endDateEl.addEventListener('change', updateCrawlBtn);
+
+  /* ── 선생님 목록 로드 ── */
+  (async () => {
+    try {
+      const res  = await fetch('/api/teachers');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '오류');
+      teachers = data.teachers.map(t => ({ ...t, checked: false }));
+      renderTeachers();
+    } catch (err) {
+      teacherListEl.innerHTML =
+        '<p class="text-xs text-center text-red-400 py-4">불러오기 실패</p>';
+      teacherErrorEl.textContent = err.message;
+      teacherErrorEl.classList.remove('hidden');
+    }
+  })();
+
+  /* ── 크롤링 ── */
+  crawlBtn.addEventListener('click', async () => {
+    const selected = teachers.filter(t => t.checked);
+    if (!selected.length || !startDateEl.value || !endDateEl.value) return;
+    if (startDateEl.value > endDateEl.value) {
+      statusMsg.textContent = '시작 날짜가 종료 날짜보다 늦습니다.';
+      statusMsg.className = 'text-[11px] text-center text-red-400';
+      statusMsg.classList.remove('hidden'); return;
+    }
+
+    crawlBtn.disabled = true;
+    crawlBtnText.innerHTML =
+      '<svg class="inline w-3.5 h-3.5 mr-1 spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+      '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>' +
+      '수집 중...';
+    loadingTrack.classList.remove('hidden');
+    statusMsg.textContent = `${selected.length}명 대상으로 수집 중...`;
+    statusMsg.className = 'text-[11px] text-center text-gray-400';
+    statusMsg.classList.remove('hidden');
+    resultSection.classList.add('hidden');
+    emptyState.classList.remove('hidden');
+    qnaSearch.value = '';
+
+    try {
+      const res = await fetch('/api/crawl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start_date: toApiDate(startDateEl.value),
+          end_date:   toApiDate(endDateEl.value),
+          teachers:   selected.map(({ code, name }) => ({ code, name })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `서버 오류 (${res.status})`);
+
+      currentExcelB64 = data.excel_b64;
+      currentFilename = `mimac_qna_${startDateEl.value.replace(/-/g,'')}_${endDateEl.value.replace(/-/g,'')}.xlsx`;
+      allItems = data.items || [];
+
+      /* 메인 헤더 갱신 */
+      mainHeader.innerHTML =
+        `<p class="text-sm font-bold text-gray-800">${selected.map(t=>t.name).join(', ')}</p>` +
+        `<p class="text-xs text-gray-400 mt-0.5">${startDateEl.value.replace(/-/g,'/')} ~ ${endDateEl.value.replace(/-/g,'/')} · 총 ${data.count.toLocaleString()}건</p>`;
+
+      /* 다운로드 버튼 표시 */
+      downloadBtn.classList.remove('hidden');
+      downloadBtn.classList.add('flex');
+
+      /* 통계 카드 */
+      const cats = { '[강좌]': { color:'text-blue-600', bg:'bg-blue-50', icon:'📚' },
+                     '[교재]': { color:'text-emerald-600', bg:'bg-emerald-50', icon:'📖' },
+                     '[학습법]':{ color:'text-violet-600', bg:'bg-violet-50', icon:'💡' },
+                     '[기타]': { color:'text-gray-500', bg:'bg-gray-50', icon:'📌' } };
+      const counts = {};
+      allItems.forEach(it => { counts[it['구분']] = (counts[it['구분']] || 0) + 1; });
+
+      statCards.innerHTML =
+        `<div class="bg-white rounded-2xl border border-gray-100 p-4">
+           <p class="text-xs text-gray-400 mb-1">전체</p>
+           <p class="text-2xl font-black text-orange-500">${data.count.toLocaleString()}</p>
+           <p class="text-xs text-gray-400 mt-0.5">건</p>
+         </div>` +
+        Object.entries(cats).map(([k, v]) =>
+          `<div class="bg-white rounded-2xl border border-gray-100 p-4">
+             <p class="text-xs text-gray-400 mb-1">${k}</p>
+             <p class="text-2xl font-black ${v.color}">${(counts[k]||0).toLocaleString()}</p>
+             <p class="text-xs text-gray-400 mt-0.5">건</p>
+           </div>`
+        ).join('');
+
+      /* 사이드바 미니 통계 */
+      miniStatContent.innerHTML = Object.entries(cats).map(([k, v]) =>
+        `<div class="flex items-center justify-between">
+           <span class="text-xs text-gray-500">${k}</span>
+           <span class="text-xs font-bold ${v.color}">${(counts[k]||0).toLocaleString()}건</span>
+         </div>`
+      ).join('');
+      miniStats.classList.remove('hidden');
+
+      /* 카드 + 분석 */
+      renderCards(allItems);
+      renderAnalysis(document.getElementById('table1'), data.analysis1);
+      renderAnalysis(document.getElementById('table2'), data.analysis2);
+      tab0Count.textContent = `(${data.count.toLocaleString()})`;
+      switchTab(0);
+
+      emptyState.classList.add('hidden');
+      resultSection.classList.remove('hidden');
+      statusMsg.classList.add('hidden');
+    } catch (err) {
+      statusMsg.textContent = `오류: ${err.message}`;
+      statusMsg.className = 'text-[11px] text-center text-red-400';
+      statusMsg.classList.remove('hidden');
+    } finally {
+      crawlBtn.disabled = false;
+      crawlBtnText.textContent = '크롤링 시작';
+      loadingTrack.classList.add('hidden');
+      updateCrawlBtn();
+    }
+  });
+
+  /* ── Excel 다운로드 ── */
+  downloadBtn.addEventListener('click', () => {
+    if (!currentExcelB64) return;
+    const bytes = atob(currentExcelB64);
+    const arr   = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    const blob = new Blob([arr], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = currentFilename; a.click();
+    URL.revokeObjectURL(url);
+  });
+</script>
+</body>
+</html>
