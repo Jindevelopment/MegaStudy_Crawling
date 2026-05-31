@@ -1,9 +1,9 @@
 {
-  "builds": [
-    { "src": "api/index.py", "use": "@vercel/python" }
-  ],
-  "routes": [
-    { "src": "/api/(.*)", "dest": "api/index.py" },
-    { "src": "/(.*)",     "dest": "/public/$1"   }
+  "functions": {
+    "api/index.py": { "runtime": "@vercel/python" }
+  },
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/index.py" },
+    { "source": "/:path*",     "destination": "/public/:path*" }
   ]
 }
